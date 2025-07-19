@@ -5,31 +5,32 @@
 # The port where the Streamlit app will run.
 # Default: 8501
 port = 8501
+address = "0.0.0.0"
 
 # Run the server in a non-headless mode (opens browser automatically).
 # Default: true
-headless = false
+headless = true
 
 # Enable or disable the file watcher. Disabling can be useful for performance
 # in certain environments, but usually kept true for development.
 # Default: true
-# enableCORS = true
-# enableXsrfProtection = true
+enableCORS = true
+enableXsrfProtection = true
 
 [global]
 # Show a menu button in the top right corner of your app.
 # Default: true
-showSidebarNavigation = true
+# showSidebarNavigation = true
 
 # Show the 'Made with Streamlit' footer.
 # Default: true
-# showPoweredBy = false
+showPoweredBy = false
 
 [client]
 # Whether to show the sidebar (True) or hide it (False) by default.
 # Default: 'auto' (shows sidebar if there's content, hides if not)
 # This can be overridden in st.set_page_config(initial_sidebar_state="collapsed")
-toolbarMode = "auto" # "on", "off", "auto"
+toolbarMode = "off" # "on", "off", "auto"
 
 [browser]
 # Set the page title that appears in the browser tab.
