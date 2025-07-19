@@ -1,0 +1,71 @@
+# This file is for Streamlit configuration settings.
+# It should be placed in the .streamlit/ directory in your project root.
+
+[server]
+# The port where the Streamlit app will run.
+# Default: 8501
+port = 8501
+
+# Run the server in a non-headless mode (opens browser automatically).
+# Default: true
+headless = false
+
+# Enable or disable the file watcher. Disabling can be useful for performance
+# in certain environments, but usually kept true for development.
+# Default: true
+# enableCORS = true
+# enableXsrfProtection = true
+
+[global]
+# Show a menu button in the top right corner of your app.
+# Default: true
+showSidebarNavigation = true
+
+# Show the 'Made with Streamlit' footer.
+# Default: true
+# showPoweredBy = false
+
+[client]
+# Whether to show the sidebar (True) or hide it (False) by default.
+# Default: 'auto' (shows sidebar if there's content, hides if not)
+# This can be overridden in st.set_page_config(initial_sidebar_state="collapsed")
+toolbarMode = "auto" # "on", "off", "auto"
+
+[browser]
+# Set the page title that appears in the browser tab.
+# This will be overridden by st.set_page_config(page_title=...) in app.py
+gatherUsageStats = false # It's good practice to turn this off for user privacy
+
+[logger]
+# The minimum level of logs that will be displayed.
+# Options: "info", "warning", "debug", "error", "critical"
+# Default: "info"
+level = "info"
+
+[theme]
+# Uncomment and customize these for a custom theme.
+
+# Primary brand color for your app.
+primaryColor = "#4CAF50" # A nice green for finance
+
+# Background color for the app.
+backgroundColor = "#FFFFFF" # White
+
+# Background color for sidebar and most UI elements.
+secondaryBackgroundColor = "#F0F2F6" # Light gray
+
+# Text color for the app.
+textColor = "#303030" # Dark gray
+
+# Font family. Options: "sans serif", "serif", "monospace"
+font = "sans serif"
+
+# Some specific elements color (e.g., text inputs borders on focus)
+# base = "light" # or "dark" if you prefer a dark theme
+
+# [server.hashing]
+# fileWatcherType = "auto" # or "watchdog", "poll" for troubleshooting file changes
+
+# [server.fileWatcher]
+# poll_delay = 0.1
+# poll_duration = 0.2
