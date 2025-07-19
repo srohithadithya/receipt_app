@@ -30,7 +30,7 @@ showPoweredBy = false
 # Whether to show the sidebar (True) or hide it (False) by default.
 # Default: 'auto' (shows sidebar if there's content, hides if not)
 # This can be overridden in st.set_page_config(initial_sidebar_state="collapsed")
-toolbarMode = "off" # "on", "off", "auto"
+toolbarMode = "auto" # "on", "off", "auto"
 
 [browser]
 # Set the page title that appears in the browser tab.
