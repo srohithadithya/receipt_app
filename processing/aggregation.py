@@ -20,7 +20,6 @@ def calculate_expenditure_summary(df: pd.DataFrame, amount_col: str = 'amount') 
         logger.warning("DataFrame is empty, missing amount column, or amount column is not numeric. Returning default summary.")
         return 0.0, 0.0, 0.0, []
 
-    # Drop any non-numeric or NaN values from the amount column for calculations
     amounts = df[amount_col].dropna().astype(float)
 
     if amounts.empty:
@@ -29,7 +28,6 @@ def calculate_expenditure_summary(df: pd.DataFrame, amount_col: str = 'amount') 
     total_spend = amounts.sum()
     mean_spend = amounts.mean()
     median_spend = amounts.median()
-    # Mode can return multiple values, so return as a list
     mode_spend = amounts.mode().tolist()
 
     logger.info(f"Calculated expenditure summary: Total={total_spend:.2f}, Mean={mean_spend:.2f}, Median={median_spend:.2f}, Mode={mode_spend}")
@@ -114,8 +112,6 @@ def get_monthly_spend_trend(df: pd.DataFrame, date_col: str = 'transaction_date'
 
 # Example Usage (for testing/demonstration)
 if __name__ == "__main__":
-    # Create dummy data resembling parsed receipts (as a list of dicts)
-    # In a real scenario, this would come from database/crud.py's get_receipts_by_user
     sample_receipt_data = [
         {"id": 1, "vendor_name": "SuperMart", "amount": 100.50, "transaction_date": date(2023, 1, 15), "category_name": "Groceries"},
         {"id": 2, "vendor_name": "Electricity Co.", "amount": 50.25, "transaction_date": date(2023, 1, 20), "category_name": "Utilities"},
