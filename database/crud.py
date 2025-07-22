@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database.models import User, Receipt, Vendor, Category
-from utils.security import hash_password # Assuming utils.security has hash_password function
+from utils.security import hash_password 
 from datetime import date, datetime
 import logging
 
