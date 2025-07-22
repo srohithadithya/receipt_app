@@ -6,7 +6,7 @@ def show_home_page():
     # Using markdown with custom CSS class for horizontal alignment and styling
     st.markdown("""
     <div class="welcome-header">
-        <img src="assets/images/logo.png" alt="Receipt Tracker Logo",width=150>
+        <img src="assets/images/logo.png",width=150>
         <h1>Welcome to Receipt & Bill Tracker!</h1>
     </div>
     """, unsafe_allow_html=True)
