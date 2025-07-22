@@ -38,7 +38,7 @@ def linear_search_records(
                 if normalized_query in normalized_value:
                     match_found = True
                     break
-            elif value is not None and not fields: # If no specific fields, check non-string values too (converted to string)
+            elif value is not None and not fields:
                 str_value = str(value)
                 normalized_str_value = str_value if case_sensitive else str_value.lower()
                 if normalized_query in normalized_str_value:
