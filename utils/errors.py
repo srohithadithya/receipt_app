@@ -1,4 +1,4 @@
-from typing import Optional, Any # Added Any here
+from typing import Optional, Any, Dict # Added Any here
 
 class AppError(Exception):
     """Base exception for all custom application-specific errors."""
