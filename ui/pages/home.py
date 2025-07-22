@@ -8,7 +8,7 @@ def show_home_page():
 
     st.markdown("""
     <div class="welcome-header">
-        <img src="assets/images/logo.png" alt="Receipt Tracker Logo">
+        <img src="assets/images/logo.png" alt="Receipt Tracker Logo", width = 150>
         <h1>Welcome to Receipt & Bill Tracker!</h1>
     </div>
     """, unsafe_allow_html=True)
