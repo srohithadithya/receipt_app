@@ -1,11 +1,13 @@
 import re
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import logging
+import PyPDF2
+import io # Import io for BytesIO
 
 # Local imports
-from processing.ingestion import read_file_content # To get raw bytes for OCR
+from processing.ingestion import read_file_content
 from processing.ocr_utils import extract_text_from_image, detect_language
 from processing.validation import ParsedReceiptData, validate_file_type
 from utils.errors import ParsingError, FileProcessingError # Assuming these custom errors exist
@@ -13,145 +15,214 @@ from utils.errors import ParsingError, FileProcessingError # Assuming these cust
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Re-define formats_to_try to be accessible in the module
+formats_to_try = [
+    "%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y", # YYYY-MM-DD, DD-MM-YYYY, MM-DD-YYYY
+    "%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", # YYYY/MM/DD, DD/MM/YYYY, MM/DD/YYYY
+    "%Y.%m.%d", "%d.%m.%Y", "%m.%d.%Y", # YYYY.MM.DD, DD.MM.YYYY, MM.DD.YYYY
+    "%b %d, %Y", "%B %d, %Y",            # Jan 01, 2023 / January 01, 2023
+    "%d %b %Y", "%d %B %Y",            # 01 Jan 2023 / 01 January 2023
+    "%Y%m%d",                           # YYYYMMDD (e.g., 20230115)
+    "%y-%m-%d", "%d-%m-%y", # For 2-digit years
+    "%y/%m/%d", "%d/%m/%y"
+]
+
+
 def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     """
     Extracts structured data (vendor, date, amount, currency, category, billing period)
     from a block of text using rule-based (regex) parsing.
+    Improved robustness for various receipt formats and OCR noise.
 
     :param text: The raw text content of the receipt/bill.
     :param file_type: The type of file (e.g., 'image', 'pdf', 'text'), used for context.
     :return: A dictionary of extracted fields.
     """
     extracted_data = {}
+    lines = text.split('\n')
     lower_text = text.lower()
 
-    # 1. Extract Amount and Currency
-    # Prioritize patterns with currency symbols first, then floating point numbers
-    # Regex for currency symbols ($€£₹) followed by numbers
-    amount_regex_strong_currency = r"(?:total|amount|sum|grand total|bill|paid)\s*[:=]?\s*([$€£₹]\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)"
-    amount_regex_iso_currency = r"((?:USD|EUR|GBP|INR|CAD|AUD)\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)"
-    amount_regex_floating = r"(?<!\d)(?:total|amount|sum|grand total|bill|paid|due)\s*[:=]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)(?!\d)" # Captures the number only
-
-    currency_map = {
-        '$': 'USD', '€': 'EUR', '£': 'GBP', '₹': 'INR',
-        'usd': 'USD', 'eur': 'EUR', 'gbp': 'GBP', 'inr': 'INR'
-    }
-
-    match_currency_symbol = re.search(amount_regex_strong_currency, lower_text, re.IGNORECASE)
-    match_iso_currency = re.search(amount_regex_iso_currency, lower_text, re.IGNORECASE)
+    # --- 1. Extract Amount and Currency ---
+    # More robust patterns for total/amount, trying common keywords and positioning
+    amount_patterns = [
+        # Strong indicators for total amounts, allowing for variations in spacing/symbols
+        r"(?:total|amount due|grand total|net amount|balance due|total paid|total bill|due amount)\s*[:=]?\s*([$€£₹]\s*[\d,]+\.?\d{0,2})",
+        r"([$€£₹]\s*[\d,]+\.?\d{0,2})\s*(?:total|amount|due|paid)", # Amount before keyword
+        r"(?:total|amount|sum|grand total|bill|paid|due)\s*[:=]?\s*([\d,]+\.?\d{0,2})", # Generic numbers after keywords
+        r"([\d,]+\.?\d{0,2})\s*(?:usd|eur|gbp|inr|cad|aud)", # Numbers before ISO currency
+        r"(?:usd|eur|gbp|inr|cad|aud)\s*([\d,]+\.?\d{0,2})" # ISO currency before numbers
+    ]
 
     amount = None
     currency = "USD" # Default currency
 
-    if match_currency_symbol:
-        value_str = match_currency_symbol.group(1).replace(',', '')
-        symbol = value_str[0]
-        if symbol in currency_map:
-            currency = currency_map[symbol]
-            amount = float(re.sub(r"[^0-9.]", "", value_str)) # Remove non-numeric except dot
-        logger.debug(f"Amount (strong currency) found: {amount} {currency}")
-    elif match_iso_currency:
-        value_str = match_iso_currency.group(1).replace(',', '')
-        iso_code = value_str[:3].upper()
-        if iso_code in currency_map:
-            currency = currency_map[iso_code]
-            amount = float(re.sub(r"[^0-9.]", "", value_str))
-        logger.debug(f"Amount (ISO currency) found: {amount} {currency}")
-    else:
-        # Fallback to general floating point number if no currency symbol found
-        matches_floating = re.findall(amount_regex_floating, lower_text, re.IGNORECASE)
-        if matches_floating:
-            # Try to pick the last found number as it's often the total
+    for pattern in amount_patterns:
+        match = re.search(pattern, lower_text, re.IGNORECASE)
+        if match:
+            value_str = match.group(1).replace(',', '').strip()
+            # Attempt to extract currency symbol/code if present in the matched string
+            detected_curr = re.search(r'([$€£₹]|usd|eur|gbp|inr|cad|aud)', value_str, re.IGNORECASE)
+            if detected_curr:
+                symbol_or_code = detected_curr.group(1).upper()
+                if symbol_or_code == '$': currency = 'USD'
+                elif symbol_or_code == '€': currency = 'EUR'
+                elif symbol_or_code == '£': currency = 'GBP'
+                elif symbol_or_code == '₹': currency = 'INR'
+                else: currency = symbol_or_code # For ISO codes
+
+            # Clean the number string
+            clean_value_str = re.sub(r'[^\d.]', '', value_str) # Keep only digits and dot
             try:
-                potential_amount = float(matches_floating[-1].replace(',', ''))
-                # Basic sanity check for amount (e.g., usually not extremely small for totals)
-                if potential_amount > 0.1:
-                    amount = potential_amount
+                amount = float(clean_value_str)
+                # Simple sanity check for amounts (e.g., not extremely small or huge by accident)
+                if amount > 0.01 and amount < 1_000_000:
+                    break # Found a plausible amount, stop searching
+                else:
+                    amount = None # Discard implausible amount
             except ValueError:
-                pass
-        logger.debug(f"Amount (floating point fallback) found: {amount}")
+                amount = None # Keep trying other patterns
 
     if amount is not None:
         extracted_data['amount'] = amount
-        extracted_data['currency'] = currency # Keep default if not detected
+        extracted_data['currency'] = currency
+        logger.debug(f"Amount found: {amount} {currency}")
+    else:
+        logger.warning("Could not reliably extract amount.")
 
-    # 2. Extract Date
-    # Common date formats (YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY, Month DD, YYYY)
+    # --- 2. Extract Date ---
+    # More date formats and robust extraction, trying multiple lines
     date_patterns = [
-        r'\d{4}[-/]\d{2}[-/]\d{2}',            # YYYY-MM-DD or YYYY/MM/DD
-        r'\d{2}[-/]\d{2}[-/]\d{4}',            # DD-MM-YYYY or DD/MM-YYYY
+        r'\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}',            # DD-MM-YY, DD/MM/YYYY etc.
+        r'\d{4}[-/.]\d{1,2}[-/.]\d{1,2}',            # YYYY-MM-DD etc.
         r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}[,\s]+\d{4}', # Mon DD, YYYY
-        r'\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}' # DD Mon YYYY
+        r'\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}', # DD Month YYYY
+        r'\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{2}', # DD Mon YY (e.g., 15 Jan 24)
+        r'\d{1,2}[-/](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-/]\d{2,4}', # DD-Mon-YYYY
     ]
+    date_keywords = ['date', 'bill date', 'invoice date', 'transaction date', 'sale date', 'paid date', 'issue date']
     transaction_date = None
-    for pattern in date_patterns:
-        match = re.search(pattern, lower_text, re.IGNORECASE)
-        if match:
-            date_str = match.group(0).replace('.', '').replace(',', '')
-            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%Y', '%b %d %Y', '%B %d %Y', '%d %b %Y', '%d %B %Y'):
-                try:
-                    transaction_date = datetime.strptime(date_str, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            if transaction_date:
-                break
+
+    for line in lines:
+        lower_line = line.lower()
+        for keyword in date_keywords:
+            if keyword in lower_line:
+                for pattern in date_patterns:
+                    match = re.search(pattern, lower_line)
+                    if match:
+                        # Use the global formats_to_try for robust parsing
+                        for fmt in formats_to_try:
+                            try:
+                                transaction_date = datetime.strptime(match.group(0).replace('.', '').replace(',', ''), fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                        if transaction_date: break # Found date, break from keyword loop
+                if transaction_date: break # Found date, break from line loop
+        if transaction_date: break # Found date, break from line loop
+
+    # Fallback: if not found near keyword, search widely
+    if not transaction_date:
+        for pattern in date_patterns:
+            match = re.search(pattern, lower_text)
+            if match:
+                for fmt in formats_to_try:
+                    try:
+                        transaction_date = datetime.strptime(match.group(0).replace('.', '').replace(',', ''), fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                if transaction_date: break
+    
     if transaction_date:
         extracted_data['transaction_date'] = transaction_date
         logger.debug(f"Transaction date found: {transaction_date}")
+    else:
+        logger.warning("Could not reliably extract transaction date.")
 
-    # 3. Extract Vendor / Biller (Rule-based, can be expanded with known vendor lists)
-    vendor_keywords = [
-        r'invoice from\s*(.+)',
-        r'bill from\s*(.+)',
-        r'receipt from\s*(.+)',
-        r'sold by\s*(.+)',
-        r'purchased from\s*(.+)',
-        r'billed by\s*(.+)',
-        r'(?:vendor|biller|store):\s*(.+)',
-        r'company:\s*(.+)'
+
+     # --- 3. Extract Vendor / Biller ---
+    vendor_patterns = [
+        r'invoice from[:\s]*(.+)',
+        r'bill from[:\s]*(.+)',
+        r'receipt from[:\s]*(.+)',
+        r'sold by[:\s]*(.+)',
+        r'purchased from[:\s]*(.+)',
+        r'billed by[:\s]*(.+)',
+        r'(?:vendor|biller|store|company)[:\s]*(.+)'
     ]
     vendor_name = None
-    for pattern in vendor_keywords:
-        match = re.search(pattern, lower_text, re.IGNORECASE)
+
+    # First, look for strong indicators
+    for pattern in vendor_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            # Simple heuristic: take the first line after the keyword, up to a common separator
             potential_vendor = match.group(1).split('\n')[0].strip()
-            # Clean up potential trailing info or common junk
-            potential_vendor = re.split(r'[,;]\s*|phone|tel|email|website|www\.', potential_vendor, 1)[0].strip()
-            if potential_vendor and len(potential_vendor) > 2 and len(potential_vendor) < 100: # Basic length check
+            # Clean up: remove address lines, phone numbers, websites, tax IDs, common corporate suffixes etc.
+            potential_vendor = re.split(r'[,;]\s*|phone|tel|email|website|www\.|gst|vat|abn|cin|ltd|inc|co\.|corporation|group|llc|pvt', potential_vendor, 1)[0].strip()
+            if potential_vendor and len(potential_vendor) > 2 and len(potential_vendor) < 100:
                 vendor_name = potential_vendor
                 break
     
-    # Fallback: Look for company names/common patterns at the beginning of the document
+    # Fallback: Heuristics for common top-of-document placements
+    # Scan the first few non-empty lines for prominent text
     if not vendor_name:
-        # Simple heuristic: often the first few lines contain the vendor name
-        first_lines = text.split('\n')[:5]
-        for line in first_lines:
-            line = line.strip()
-            if len(line) > 5 and len(line) < 50 and not re.search(r'\d', line): # Likely a name, not date/amount
-                # Avoid lines that look like addresses or dates if possible
-                if not any(k in line.lower() for k in ['date', 'total', 'amount', 'street', 'road', 'avenue', 'p.o. box']):
-                     vendor_name = line
-                     break
-    
-    if vendor_name:
-        extracted_data['vendor_name'] = vendor_name.title() # Capitalize words for consistency
-        logger.debug(f"Vendor name found: {vendor_name}")
+        # Consider the first 5-7 non-empty lines
+        top_lines_to_scan = [line.strip() for line in lines if line.strip()][:7] 
+        
+        for i, line_content in enumerate(top_lines_to_scan):
+            if not line_content: continue # Skip empty lines
 
-    # 4. Extract Category (Optional, based on keywords or known vendors)
-    # This is a very basic example; a more robust system would use a lookup table for vendors
-    # or more sophisticated NLP.
+            # Clean the line a bit
+            cleaned_line = line_content.strip()
+
+            # Criteria for a potential vendor name at the top:
+            # 1. Not too long, not too short
+            # 2. Contains at least one letter
+            # 3. Does not look like an address (no common address keywords)
+            # 4. Does not look like a date or total line
+            # 5. Often starts with an uppercase letter, or is all caps
+            # 6. Check for common company suffixes or keywords (e.g., Ltd, Inc, Co, Group, Services)
+            # 7. Relax digit check slightly, but avoid lines that are mostly numbers (like phone numbers)
+            
+            is_address_like = re.search(r'street|road|avenue|po box|p\.o\.|city|state|zip|pin|building|floor|apt|suite|flat|unit', cleaned_line, re.IGNORECASE)
+            is_number_heavy = bool(re.search(r'\d{3,}', cleaned_line)) and len(re.findall(r'\d', cleaned_line)) / len(cleaned_line) > 0.3 # More than 30% digits
+            is_date_amount_keyword = re.search(r'date|total|amount|invoice|receipt|bill|gst|vat', cleaned_line, re.IGNORECASE)
+            is_too_short_or_long = not (3 < len(cleaned_line) < 60) # Adjusted max length
+
+            if (not is_address_like and
+                not is_number_heavy and
+                not is_date_amount_keyword and
+                not is_too_short_or_long and
+                (cleaned_line[0].isupper() or cleaned_line.isupper() or len(cleaned_line.split()) > 1)): # Starts with uppercase, or all caps, or multiple words
+                
+                vendor_name = cleaned_line
+                # If we found a plausible candidate very early, prioritize it
+                if i == 0 and not is_number_heavy: # Very first line is often the main name
+                    break
+                elif i < 3 and len(cleaned_line.split()) < 5: # Short, clean lines in the first few are strong candidates
+                    break
+                
+    if vendor_name:
+        # Final cleanup: remove extra spaces, then title-case.
+        vendor_name = ' '.join(vendor_name.split()).title()
+        extracted_data['vendor_name'] = vendor_name
+        logger.debug(f"Vendor name found: {vendor_name}")
+    else:
+        logger.warning("Could not reliably extract vendor name.")
+        
+    # --- 4. Extract Category (Optional) ---
     category_map = {
-        'grocer': 'Groceries', 'supermart': 'Groceries', 'hypermarket': 'Groceries',
+        'grocer': 'Groceries', 'supermart': 'Groceries', 'hypermarket': 'Groceries', 'foodmart': 'Groceries', 'bakery': 'Groceries', 'market': 'Groceries',
         'electricity': 'Utilities', 'power bill': 'Utilities', 'light bill': 'Utilities',
-        'internet': 'Utilities', 'telecom': 'Utilities', 'broadband': 'Utilities',
-        'water bill': 'Utilities',
-        'restaurant': 'Dining', 'cafe': 'Dining', 'food': 'Dining',
-        'petrol': 'Transport', 'gas station': 'Transport', 'fuel': 'Transport',
-        'pharmacy': 'Health', 'medicine': 'Health',
-        'fashion': 'Shopping', 'clothing': 'Shopping',
-        'online store': 'Shopping' # Generic
+        'internet': 'Utilities', 'telecom': 'Utilities', 'broadband': 'Utilities', 'water bill': 'Utilities', 'gas bill': 'Utilities',
+        'restaurant': 'Dining', 'cafe': 'Dining', 'food': 'Dining', 'diner': 'Dining', 'eatery': 'Dining', 'pizzeria': 'Dining', 'kfc': 'Dining', 'mcdonalds': 'Dining',
+        'petrol': 'Transport', 'gas station': 'Transport', 'fuel': 'Transport', 'auto': 'Transport', 'car wash': 'Transport',
+        'pharmacy': 'Health', 'medicine': 'Health', 'clinic': 'Health', 'hospital': 'Health', 'doctor': 'Health',
+        'fashion': 'Shopping', 'clothing': 'Shopping', 'boutique': 'Shopping', 'retail': 'Shopping', 'department store': 'Shopping', 'mall': 'Shopping',
+        'electronics': 'Electronics', 'tech store': 'Electronics', 'computer': 'Electronics', 'mobile': 'Electronics',
+        'bookstore': 'Books', 'library': 'Books',
+        'travel': 'Travel', 'airline': 'Travel', 'hotel': 'Travel', 'vacation': 'Travel', 'resort': 'Travel',
+        'subscription': 'Subscriptions', 'monthly fee': 'Subscriptions', 'membership': 'Subscriptions', 'streaming': 'Subscriptions'
     }
     extracted_data['category_name'] = None
     for keyword, category in category_map.items():
@@ -160,21 +231,48 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
             logger.debug(f"Category found: {category}")
             break
 
-    # 5. Extract Billing Period (for bills)
-    billing_period_regex = r"(?:billing|service)\s*period[:=]?\s*(\d{2}[-/]\d{2}[-/]\d{4}\s*to\s*\d{2}[-/]\d{2}[-/]\d{4})"
-    match = re.search(billing_period_regex, lower_text, re.IGNORECASE)
-    if match:
-        period_str = match.group(1)
-        dates = re.findall(r'\d{2}[-/]\d{2}[-/]\d{4}', period_str)
-        if len(dates) == 2:
-            try:
-                start_date = datetime.strptime(dates[0], '%d-%m-%Y').date()
-                end_date = datetime.strptime(dates[1], '%d-%m-%Y').date()
-                extracted_data['billing_period_start'] = start_date
-                extracted_data['billing_period_end'] = end_date
-                logger.debug(f"Billing period found: {start_date} to {end_date}")
-            except ValueError:
-                pass
+
+    # --- 5. Extract Billing Period ---
+    billing_period_patterns = [
+        r"(?:billing|service|period)\s*[:=]?\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\s*(?:to|-)\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})",
+        r"for the period\s*from\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\s*to\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
+    ]
+    billing_period_start = None
+    billing_period_end = None
+
+    for pattern in billing_period_patterns:
+        match = re.search(pattern, lower_text, re.IGNORECASE)
+        if match:
+            date_str1 = match.group(1).replace('.', '')
+            date_str2 = match.group(2).replace('.', '')
+            
+            parsed_start = None
+            parsed_end = None
+            for fmt in formats_to_try: # Use the same comprehensive formats as for transaction_date
+                try:
+                    parsed_start = datetime.strptime(date_str1, fmt).date()
+                    break
+                except ValueError:
+                    pass
+            for fmt in formats_to_try:
+                try:
+                    parsed_end = datetime.strptime(date_str2, fmt).date()
+                    break
+                except ValueError:
+                    pass
+            
+            if parsed_start and parsed_end:
+                billing_period_start = parsed_start
+                billing_period_end = parsed_end
+                break
+    
+    if billing_period_start and billing_period_end:
+        extracted_data['billing_period_start'] = billing_period_start
+        extracted_data['billing_period_end'] = billing_period_end
+        logger.debug(f"Billing period found: {billing_period_start} to {billing_period_end}")
+    else:
+        logger.debug("Could not reliably extract billing period.")
+
 
     return extracted_data
 
@@ -201,45 +299,66 @@ def parse_document(file_path: Path, original_filename: str) -> Optional[ParsedRe
     extracted_text = None
     if file_type == 'text':
         try:
-            extracted_text = raw_content_bytes.decode('utf-8')
+            # Try common encodings
+            for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                try:
+                    extracted_text = raw_content_bytes.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if not extracted_text:
+                raise UnicodeDecodeError("All common encodings failed.")
             logger.info(f"Read text directly from {original_filename}.")
-        except UnicodeDecodeError as e:
-            logger.error(f"Failed to decode text file {original_filename}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to decode text file {original_filename}: {e}", exc_info=True)
             raise FileProcessingError(f"Failed to decode text file: {e}")
-    elif file_type in ['image', 'pdf']:
-        # For PDF, first extract text directly if possible (PyPDF2), then fallback to OCR image layers
-        if file_type == 'pdf':
-            # This is a simple text extraction. More advanced PDF parsing might be needed.
-            try:
-                import PyPDF2
-                reader = PyPDF2.PdfReader(file_path)
-                pdf_text = ""
-                for page in reader.pages:
-                    pdf_text += page.extract_text() or ""
-                if pdf_text.strip():
-                    extracted_text = pdf_text
-                    logger.info(f"Extracted text directly from PDF {original_filename}.")
-                else:
-                    logger.info(f"No text found directly in PDF {original_filename}, attempting OCR.")
-            except Exception as e:
-                logger.warning(f"Error extracting text directly from PDF {original_filename}: {e}. Falling back to OCR.")
-        
-        if not extracted_text or not extracted_text.strip(): # If PDF had no text, or it's an image
-            try:
-                # Basic language detection (from ocr_utils)
-                detected_lang = detect_language(raw_content_bytes)
-                ocr_lang = detected_lang if detected_lang else 'eng' # Default to English
-                
-                extracted_text = extract_text_from_image(raw_content_bytes, lang=ocr_lang)
-                if not extracted_text:
-                    raise ParsingError(f"OCR failed to extract text from {original_filename}.")
-                logger.info(f"Extracted text from {original_filename} using OCR (lang={ocr_lang}).")
-            except Exception as e:
-                logger.error(f"OCR processing failed for {original_filename}: {e}")
-                raise ParsingError(f"OCR processing failed: {e}")
-    
+    elif file_type == 'pdf':
+        try:
+            # Attempt to extract text directly from PDF using PyPDF2
+            pdf_file_obj = io.BytesIO(raw_content_bytes)
+            reader = PyPDF2.PdfReader(pdf_file_obj)
+            pdf_text = ""
+            for page in reader.pages:
+                pdf_text += page.extract_text() or "" # extract_text() can return None
+            
+            if pdf_text.strip():
+                extracted_text = pdf_text
+                logger.info(f"Extracted text directly from PDF {original_filename}.")
+            else:
+                logger.info(f"PDF {original_filename} contains no selectable text, or text extraction failed. Skipping OCR for PDF.")
+                # We are explicitly NOT falling back to OCR for PDFs here
+                # because `ocr_utils.extract_text_from_image` expects image bytes,
+                # not raw PDF bytes, and we are not introducing a PDF rendering library.
+                # If a PDF contains no selectable text (i.e., it's a scanned image-based PDF),
+                # it cannot be OCR'd with the current `ocr_utils` setup.
+                # User should be informed to convert such PDFs to images first.
+
+        except Exception as e:
+            logger.warning(f"Error extracting text directly from PDF {original_filename}: {e}. Treating as unreadable PDF for text extraction.", exc_info=True)
+            # This means the PDF could not be processed for text directly, and we don't have a way to OCR it.
+
+    elif file_type == 'image':
+        try:
+            detected_lang = detect_language(raw_content_bytes)
+            ocr_lang = detected_lang if detected_lang else 'eng'
+            
+            extracted_text = extract_text_from_image(raw_content_bytes, lang=ocr_lang)
+            if not extracted_text or not extracted_text.strip():
+                raise ParsingError(f"OCR failed to extract text from {original_filename}.")
+            logger.info(f"Extracted text from {original_filename} using OCR (lang={ocr_lang}).")
+        except Exception as e:
+            logger.error(f"OCR processing failed for {original_filename}: {e}", exc_info=True)
+            raise ParsingError(f"OCR processing failed: {e}")
+
+
     if not extracted_text or not extracted_text.strip():
-        raise ParsingError(f"No meaningful text extracted from {original_filename}.")
+        logger.warning(f"Final extracted text from {original_filename} is empty or only whitespace.")
+        # Specific error message for PDFs that are not text-searchable
+        if file_type == 'pdf':
+            raise ParsingError(f"PDF {original_filename} has no selectable text. Please ensure it's a text-searchable PDF or convert it to an image (.png/.jpg) for OCR processing.")
+        else:
+            raise ParsingError(f"No meaningful text extracted from {original_filename}.")
+
 
     # Perform rule-based extraction
     extracted_fields = _extract_from_text(extracted_text, file_type)
@@ -251,74 +370,6 @@ def parse_document(file_path: Path, original_filename: str) -> Optional[ParsedRe
         logger.info(f"Successfully parsed and validated data for {original_filename}.")
         return validated_data
     except Exception as e:
-        logger.error(f"Validation failed for {original_filename} with extracted fields: {extracted_fields}. Error: {e}")
+        logger.error(f"Validation failed for {original_filename} with extracted fields: {extracted_fields}. Error: {e}", exc_info=True)
+        # Re-raise as ParsingError to be caught by the uploader
         raise ParsingError(f"Data validation failed after extraction: {e}")
-
-# Example usage (for testing/demonstration)
-if __name__ == "__main__":
-    # Create dummy files for testing
-    temp_dir = Path("data/temp_parsing_test")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    # Dummy Text File
-    dummy_txt_content = """
-    Invoice No: 12345
-    Date: 2023-07-15
-    Vendor: FreshMart Groceries
-    Item: Apples 2kg @ 2.50 = 5.00
-    Item: Milk 1 unit @ 3.00 = 3.00
-    Total Amount: $8.00 USD
-    Category: Food
-    """
-    dummy_txt_path = temp_dir / "invoice.txt"
-    with open(dummy_txt_path, "w") as f:
-        f.write(dummy_txt_content)
-
-    # Dummy Image File (requires Pillow, OpenCV, Tesseract)
-    # For a realistic test, replace with a scanned receipt image.
-    dummy_img_path = temp_dir / "receipt_image.png"
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        img = Image.new('RGB', (500, 200), color = (255, 255, 255))
-        d = ImageDraw.Draw(img)
-        try:
-            font_path = "arial.ttf" # Adjust path based on your OS
-            fnt = ImageFont.truetype(font_path, 20)
-        except IOError:
-            fnt = ImageFont.load_default()
-            logger.warning("Could not load Arial.ttf for demo, using default font.")
-
-        d.text((50,50), "VENDOR: Electra Power Co.", fill=(0,0,0), font=fnt)
-        d.text((50,80), "Date: 10/06/2023", fill=(0,0,0), font=fnt)
-        d.text((50,110), "Amount Due: ₹ 750.25", fill=(0,0,0), font=fnt)
-        d.text((50,140), "Billing Period: 01-05-2023 to 31-05-2023", fill=(0,0,0), font=fnt)
-        img.save(dummy_img_path)
-    except ImportError:
-        print("Pillow, OpenCV, Tesseract-OCR required for image test. Skipping image generation.")
-        dummy_img_path = None # Set to None if PIL not available
-
-    # Test TXT file parsing
-    print("\n--- Testing TXT File Parsing ---")
-    try:
-        parsed_data_txt = parse_document(dummy_txt_path, "invoice.txt")
-        print(f"Parsed TXT Data: {parsed_data_txt.dict()}")
-    except (FileProcessingError, ParsingError) as e:
-        print(f"Error parsing TXT file: {e}")
-
-    # Test Image file parsing (if image was created)
-    if dummy_img_path and dummy_img_path.exists():
-        print("\n--- Testing Image File Parsing ---")
-        try:
-            parsed_data_img = parse_document(dummy_img_path, "receipt_image.png")
-            print(f"Parsed Image Data: {parsed_data_img.dict()}")
-        except (FileProcessingError, ParsingError) as e:
-            print(f"Error parsing Image file: {e}. Make sure Tesseract is installed and in PATH.")
-
-    # Clean up dummy files
-    if dummy_txt_path.exists():
-        dummy_txt_path.unlink()
-    if dummy_img_path and dummy_img_path.exists():
-        dummy_img_path.unlink()
-    if temp_dir.exists():
-        temp_dir.rmdir()
-    print("\nCleaned up test files and directories.")
