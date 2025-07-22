@@ -107,8 +107,8 @@ def show_upload_page():
         if parsed_results:
             st.success(f"🎉 Successfully processed {len(parsed_results)} out of {total_files} files.")
             if st.button("View Processed Records"):
-                # Redirect to records page
-                st.session_state["main_nav"] = "View Records"
+        # Corrected: Use the correct session state variable and force rerun
+                st.session_state["current_main_page"] = "View Records"
                 st.rerun()
         else:
             st.warning("No new records were successfully processed.")
