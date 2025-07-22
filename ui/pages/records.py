@@ -6,7 +6,7 @@ from database.database import get_db
 from processing.algorithms.search import linear_search_records, range_search_records, pattern_search_records, HashedIndex
 from processing.algorithms.sort import sort_records
 from ui.components import display_records_table
-from utils.helpers import convert_df_to_csv, convert_df_to_json # Import helper for export
+from utils.helpers import convert_df_to_csv, convert_df_to_json
 from datetime import date, datetime
 import logging
 
@@ -33,7 +33,7 @@ def show_records_page():
     if not receipts_db_objects:
         st.info("No records found for your account. Start by uploading receipts!")
         if st.button("Go to Upload Page"):
-            st.session_state["main_nav"] = "Upload Receipt"
+            st.session_state["main_nav_radio"] = "Upload Receipt" # Corrected session state key
             st.rerun()
         return
 
@@ -72,9 +72,9 @@ def show_records_page():
 
     # Range Search for Amount
     st.sidebar.subheader("Amount Range")
-    min_amount = st.sidebar.number_input("Min Amount", value=0.0, step=0.1)
+    min_amount = st.sidebar.number_input("Min Amount", value=float(df['amount'].min()) if not df.empty else 0.0, step=0.1)
     max_amount = st.sidebar.number_input("Max Amount", value=float(df['amount'].max()) if not df.empty else 1000.0, step=0.1)
-    if min_amount or max_amount:
+    if min_amount != float(df['amount'].min()) or max_amount != float(df['amount'].max()) or (min_amount > 0 or max_amount < 1000.0): # Only filter if values changed from default or specific range applied
         df = range_search_records(df.to_dict('records'), "amount", min_amount, max_amount)
         df = pd.DataFrame(df)
         if df.empty:
@@ -95,10 +95,10 @@ def show_records_page():
 
     if not df.empty:
         df = sort_records(df.to_dict('records'), sort_key, reverse_sort, algorithm="timsort")
-        df = pd.DataFrame(df) # Convert back to DataFrame
+        df = pd.DataFrame(df)
 
 
-    st.subheader(f"Total Records: {len(df)}")
+    st.subheader(f"Total Filtered Records: {len(df)}")
     display_records_table(df, key="records_display_table")
 
     st.markdown("---")
@@ -109,7 +109,8 @@ def show_records_page():
 
     record_ids = df['id'].tolist()
     if record_ids:
-        selected_record_id = st.selectbox("Select Record ID for Action", options=[None] + record_ids)
+        # Pre-select the first ID or None
+        selected_record_id = st.selectbox("Select Record ID for Action", options=[None] + record_ids, format_func=lambda x: f"ID: {x}" if x else "Select a record...")
     else:
         selected_record_id = None
         st.warning("No records available to select for action.")
@@ -122,7 +123,7 @@ def show_records_page():
             # Pre-fill with current values
             new_vendor_name = st.text_input("Vendor Name", value=selected_record.get("vendor_name", ""), key=f"vendor_{selected_record_id}")
             new_transaction_date = st.date_input("Transaction Date", value=selected_record.get("transaction_date", date.today()), key=f"date_{selected_record_id}")
-            new_amount = st.number_input("Amount", value=selected_record.get("amount", 0.0), step=0.01, format="%.2f", key=f"amount_{selected_record_id}")
+            new_amount = st.number_input("Amount", value=float(selected_record.get("amount", 0.0)), step=0.01, format="%.2f", key=f"amount_{selected_record_id}")
             new_currency = st.text_input("Currency", value=selected_record.get("currency", "USD"), key=f"currency_{selected_record_id}")
 
             # Get all available categories for dropdown
@@ -135,17 +136,20 @@ def show_records_page():
             selected_category_index = category_options.index(current_category_name) if current_category_name in category_options else 0
             new_category_name = st.selectbox("Category", options=category_options, index=selected_category_index, key=f"category_{selected_record_id}")
 
-            new_billing_period_start = st.date_input("Billing Period Start (Optional)", value=selected_record.get("billing_period_start"), key=f"bp_start_{selected_record_id}")
-            new_billing_period_end = st.date_input("Billing Period End (Optional)", value=selected_record.get("billing_period_end"), key=f"bp_end_{selected_record_id}")
+            # Ensure date inputs handle None for optional fields gracefully
+            bp_start_value = selected_record.get("billing_period_start")
+            bp_end_value = selected_record.get("billing_period_end")
+            new_billing_period_start = st.date_input("Billing Period Start (Optional)", value=bp_start_value if bp_start_value else None, key=f"bp_start_{selected_record_id}")
+            new_billing_period_end = st.date_input("Billing Period End (Optional)", value=bp_end_value if bp_end_value else None, key=f"bp_end_{selected_record_id}")
+
             new_original_filename = st.text_input("Original Filename", value=selected_record.get("original_filename", ""), key=f"filename_{selected_record_id}", disabled=True)
-            # Display parsed_raw_text but not allow direct editing in simple form
             st.text_area("Parsed Raw Text (Read-only)", value=selected_record.get("parsed_raw_text", "N/A"), height=150, disabled=True)
 
-            col_edit, col_delete = st.columns([1,1])
+            col_edit, col_delete = st.columns(2)
             with col_edit:
                 update_button = st.form_submit_button("Update Record")
             with col_delete:
-                delete_button = st.form_submit_button("Delete Record")
+                delete_button_trigger = st.form_submit_button("Delete Record", type="secondary") # Use secondary for destructive action
 
             if update_button:
                 db_gen_update = get_db()
@@ -164,7 +168,8 @@ def show_records_page():
                     if updated_record:
                         st.success(f"Record ID {selected_record_id} updated successfully!")
                         logger.info(f"User {user_id} updated record {selected_record_id}.")
-                        st.rerun() # Refresh page to show updated data
+                        st.session_state["current_main_page"] = "View Records" # Stay on this page
+                        st.rerun()
                     else:
                         st.error("Failed to update record. Check if the record exists and belongs to you.")
                 except Exception as e:
@@ -173,17 +178,20 @@ def show_records_page():
                 finally:
                     db_update.close()
 
-            if delete_button:
-                if st.warning(f"Are you sure you want to delete Record ID {selected_record_id}? This cannot be undone."):
-                    confirm_delete = st.button("Confirm Deletion", key=f"confirm_delete_{selected_record_id}")
-                    if confirm_delete:
+            if delete_button_trigger:
+                # Add a confirmation step for deletion
+                st.warning(f"Are you absolutely sure you want to delete Record ID {selected_record_id}? This action cannot be undone.")
+                col_confirm1, col_confirm2 = st.columns(2)
+                with col_confirm1:
+                    if st.button("Yes, Delete Permanently", key=f"confirm_delete_yes_{selected_record_id}"):
                         db_gen_delete = get_db()
                         db_delete = next(db_gen_delete)
                         try:
                             if delete_receipt(db_delete, selected_record_id, user_id):
                                 st.success(f"Record ID {selected_record_id} deleted successfully.")
                                 logger.info(f"User {user_id} deleted record {selected_record_id}.")
-                                st.rerun() # Refresh page to show updated data
+                                st.session_state["current_main_page"] = "View Records" # Stay on this page
+                                st.rerun()
                             else:
                                 st.error("Failed to delete record. Check if the record exists and belongs to you.")
                         except Exception as e:
@@ -191,6 +199,11 @@ def show_records_page():
                             logger.error(f"Error deleting record {selected_record_id} for user {user_id}: {e}")
                         finally:
                             db_delete.close()
+                with col_confirm2:
+                    if st.button("No, Cancel Deletion", key=f"confirm_delete_no_{selected_record_id}"):
+                        st.info("Deletion cancelled.")
+                        st.rerun() # Refresh to clear confirmation prompt
+
     else:
         st.info("Select a record ID above to enable manual correction or deletion.")
 
