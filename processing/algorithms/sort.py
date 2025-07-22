@@ -8,7 +8,7 @@ def sort_records(
     records: List[Dict[str, Any]],
     sort_key: str,
     reverse: bool = False,
-    algorithm: str = "timsort" # Options: "timsort" (Python's default), "quicksort", "mergesort"
+    algorithm: str = "timsort"
 ) -> List[Dict[str, Any]]:
     """
     Sorts a list of dictionaries (records) based on a specified key.
@@ -24,27 +24,22 @@ def sort_records(
     if not records:
         return []
 
-    # Handle cases where the sort_key might not exist or be comparable
     def get_sort_value(item):
         value = item.get(sort_key)
-        # Ensure comparability for common types, convert to lower for string sorting
         if isinstance(value, str):
             return value.lower()
         return value
 
     try:
         if algorithm == "timsort":
-            # Python's built-in sort (Timsort) is highly optimized and stable.
             sorted_records = sorted(records, key=get_sort_value, reverse=reverse)
             logger.info(f"Records sorted using Timsort by '{sort_key}' ({'desc' if reverse else 'asc'}).")
             return sorted_records
         elif algorithm == "quicksort":
-            # Call custom quicksort implementation
             sorted_records = _quicksort(list(records), sort_key, reverse)
             logger.info(f"Records sorted using Custom Quicksort by '{sort_key}' ({'desc' if reverse else 'asc'}).")
             return sorted_records
         elif algorithm == "mergesort":
-            # Call custom mergesort implementation
             sorted_records = _mergesort(list(records), sort_key, reverse)
             logger.info(f"Records sorted using Custom Mergesort by '{sort_key}' ({'desc' if reverse else 'asc'}).")
             return sorted_records
@@ -52,16 +47,10 @@ def sort_records(
             raise ValueError(f"Unsupported sorting algorithm: {algorithm}")
     except TypeError as e:
         logger.error(f"Error sorting records by key '{sort_key}': Incomparable types or key missing. Error: {e}")
-        # Fallback to Timsort without a key or return unsorted list if critical
         return sorted(records, key=lambda x: str(x.get(sort_key, '')), reverse=reverse) # Attempt string conversion for problematic types
     except Exception as e:
         logger.error(f"An unexpected error occurred during sorting: {e}")
-        return list(records) # Return a copy of original list if error
-
-
-# --- Custom Sorting Algorithm Implementations ---
-# These are basic implementations for demonstration and complexity analysis.
-# For production, Python's built-in `sorted()` (Timsort) is almost always preferred.
+        return list(records)
 
 def _quicksort(data: List[Dict[str, Any]], sort_key: str, reverse: bool) -> List[Dict[str, Any]]:
     """
