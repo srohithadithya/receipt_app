@@ -3,6 +3,7 @@ from PIL import Image
 import cv2
 import numpy as np
 import logging
+import re # Added for detect_language
 from typing import Optional, Tuple
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -16,45 +17,64 @@ logger = logging.getLogger(__name__)
 def preprocess_image_for_ocr(image_bytes: bytes) -> Optional[np.ndarray]:
     """
     Preprocesses an image (bytes) for better OCR accuracy.
-    Converts to grayscale, applies thresholding, and can include deskewing.
+    Converts to grayscale, applies thresholding, and can include deskewing and noise reduction.
 
     :param image_bytes: Raw image content as bytes.
     :return: Processed image as an OpenCV numpy array, or None if processing fails.
     """
     try:
-        # Convert bytes to numpy array (OpenCV format)
         np_arr = np.frombuffer(image_bytes, np.uint8)
         img_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
         if img_np is None:
-            logger.error("Failed to decode image from bytes.")
+            logger.error("Failed to decode image from bytes in preprocess_image_for_ocr.")
             return None
 
-        # Convert to grayscale
+        # --- Basic Preprocessing ---
         gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-        # Apply adaptive thresholding for better text separation
-        # Using ADAPTIVE_THRESH_GAUSSIAN_C might give better results for varied lighting
+        # Apply adaptive thresholding (good for varying lighting)
+        # Using ADAPTIVE_THRESH_GAUSSIAN_C can be more robust than MEAN_C
         thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 11, 2) # Block size 11, C value 2
 
-        # Optional: Deskewing (straighten slanted text)
-        coords = np.column_stack(np.where(thresh > 0))
-        angle = cv2.minAreaRect(coords)[-1]
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
-        (h, w) = img_np.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        deskewed = cv2.warpAffine(thresh, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        # --- Optional: Noise Reduction (Median Blur) ---
+        # Useful if image has salt-and-pepper noise
+        # thresh = cv2.medianBlur(thresh, 3) # Apply a median blur with a 3x3 kernel
 
-        logger.info("Image preprocessed (grayscale, thresholded, deskewed).")
-        return deskewed
+        # --- Optional: Deskewing (straighten slanted text) ---
+        # Only attempt if the image is large enough
+        if thresh.shape[0] > 10 and thresh.shape[1] > 10:
+            coords = np.column_stack(np.where(thresh > 0))
+            if len(coords) > 0: # Ensure there are white pixels to find contours
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                (h, w) = img_np.shape[:2]
+                center = (w // 2, h // 2)
+                M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                thresh = cv2.warpAffine(thresh, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+                logger.debug(f"Image deskewed by {angle:.2f} degrees.")
+            else:
+                logger.debug("No contours found for deskewing.")
+        else:
+            logger.debug("Image too small for deskewing attempt.")
+
+
+        # --- Ensure image is 300 DPI for Tesseract (if original resolution is too low) ---
+        # This is more conceptual for CV2 processing; actual DPI depends on initial image source
+        # For actual DPI control, you might need to resize the image explicitly.
+        # Example: if you know you want 300 DPI and current is 72, scale factor = 300/72
+        # scaled_thresh = cv2.resize(thresh, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+        # For this standard setup, we rely on the internal scaling of tesseract, or good input.
+
+        logger.info("Image preprocessed (grayscale, adaptive thresholded, deskewed attempted).")
+        return thresh # Return the processed NumPy array
 
     except Exception as e:
-        logger.error(f"Error during image preprocessing: {e}")
+        logger.error(f"Error during image preprocessing: {e}", exc_info=True)
         return None
 
 def extract_text_from_image(image_bytes: bytes, lang: str = 'eng') -> Optional[str]:
@@ -67,19 +87,20 @@ def extract_text_from_image(image_bytes: bytes, lang: str = 'eng') -> Optional[s
     """
     processed_img_np = preprocess_image_for_ocr(image_bytes)
     if processed_img_np is None:
+        logger.error("Preprocessing failed, cannot perform OCR.")
         return None
 
     try:
         # Convert the OpenCV image (NumPy array) to a PIL Image for Tesseract
         pil_img = Image.fromarray(processed_img_np)
-        text = pytesseract.image_to_string(pil_img, lang=lang)
-        logger.info(f"Text extracted using Tesseract (lang={lang}).")
+        text = pytesseract.image_to_string(pil_img, lang=lang, config='--psm 6') # --psm 6 is often good for a single uniform block of text (like a receipt)
+        logger.info(f"Text extracted using Tesseract (lang={lang}, PSM 6).")
         return text.strip()
     except pytesseract.TesseractNotFoundError:
-        logger.error("Tesseract is not installed or not found in PATH. Please install Tesseract OCR engine.")
+        logger.error("Tesseract is not installed or not found in PATH. Please install Tesseract OCR engine.", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"Error during OCR text extraction: {e}")
+        logger.error(f"Error during OCR text extraction: {e}", exc_info=True)
         return None
 
 def detect_language(image_bytes: bytes) -> Optional[str]:
@@ -91,84 +112,36 @@ def detect_language(image_bytes: bytes) -> Optional[str]:
     :param image_bytes: Raw image content as bytes.
     :return: Detected language code (e.g., 'eng', 'hin') or None.
     """
+    # For language detection, sometimes raw image works better or a different preprocessing
+    # For now, reuse the same preprocessing
     processed_img_np = preprocess_image_for_ocr(image_bytes)
     if processed_img_np is None:
         return None
 
     try:
         pil_img = Image.fromarray(processed_img_np)
-        osd = pytesseract.image_to_osd(pil_img)
+        osd_output = pytesseract.image_to_osd(pil_img)
         # Parse the OSd output to find language. This is a simple regex.
-        # A more robust parser might be needed for complex OSd outputs.
-        match = re.search(r"Script: (\w+)\nLanguage: (\w+)", osd)
+        # Example OSD output:
+        # Page number: 0
+        # Orientation in degrees: 0
+        # Rotate: 0
+        # Orientation confidence: 26.21
+        # Script: Latin
+        # Script confidence: 4.67
+        # Language: eng
+        
+        # Regex to capture the language code
+        match = re.search(r"Language:\s*(\w+)", osd_output, re.IGNORECASE)
         if match:
-            lang_code = match.group(2).lower()
-            logger.info(f"Detected language: {lang_code}")
+            lang_code = match.group(1).lower()
+            logger.info(f"Detected language: {lang_code} from OSD output.")
             return lang_code
-        logger.info("Could not reliably detect language from OSD output.")
+        logger.info("Could not reliably detect language from OSD output or OSD data missing.")
         return None
     except pytesseract.TesseractNotFoundError:
-        logger.error("Tesseract is not installed or not found in PATH for OSD. Please install Tesseract OCR engine with OSD data.")
+        logger.error("Tesseract is not installed or missing OSD data. Cannot perform language detection.", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"Error during language detection: {e}")
+        logger.error(f"Error during language detection: {e}", exc_info=True)
         return None
-
-# Example usage (for testing/demonstration)
-if __name__ == "__main__":
-    import re
-    # Create a dummy image file for testing
-    # Note: For real testing, use an actual receipt image.
-    dummy_img_path = "temp_dummy_receipt_for_ocr.png"
-    try:
-        from PIL import ImageDraw, ImageFont
-        img_test = Image.new('RGB', (400, 100), color = (255, 255, 255))
-        d = ImageDraw.Draw(img_test)
-        # Try to use a default font or one available on your system
-        try:
-            # Common font paths for different OS
-            font_path = "arial.ttf" # Windows
-            # font_path = "/Library/Fonts/Arial.ttf" # macOS
-            # font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" # Linux
-            fnt = ImageFont.truetype(font_path, 20)
-        except IOError:
-            fnt = ImageFont.load_default()
-            logger.warning("Could not load Arial.ttf, using default PIL font. Text might look different.")
-
-        d.text((10,10), "Total: $123.45", fill=(0,0,0), font=fnt)
-        d.text((10,40), "Vendor: Acme Store", fill=(0,0,0), font=fnt)
-        img_test.save(dummy_img_path)
-
-        with open(dummy_img_path, 'rb') as f:
-            dummy_image_bytes = f.read()
-
-        print("\n--- Testing extract_text_from_image (English) ---")
-        extracted_text_eng = extract_text_from_image(dummy_image_bytes, lang='eng')
-        if extracted_text_eng:
-            print(f"Extracted Text (ENG):\n{extracted_text_eng}")
-        else:
-            print("Failed to extract text (English). Check Tesseract installation and path.")
-
-        # Example for another language (requires language data installed for Tesseract)
-        # Assuming you have 'hin' (Hindi) language data installed
-        # print("\n--- Testing extract_text_from_image (Hindi) ---")
-        # extracted_text_hin = extract_text_from_image(dummy_image_bytes, lang='hin')
-        # if extracted_text_hin:
-        #     print(f"Extracted Text (HIN):\n{extracted_text_hin}")
-
-        print("\n--- Testing language detection ---")
-        detected_lang = detect_language(dummy_image_bytes)
-        if detected_lang:
-            print(f"Detected Language: {detected_lang}")
-        else:
-            print("Language detection failed or inconclusive.")
-
-    except ImportError:
-        print("Pillow and OpenCV-Python are required for OCR_Utils example. Please install them (`pip install Pillow opencv-python`).")
-    except Exception as e:
-        print(f"An error occurred during OCR_Utils example execution: {e}")
-    finally:
-        # Clean up dummy image file
-        if Path(dummy_img_path).exists():
-            Path(dummy_img_path).unlink()
-            print(f"\nCleaned up {dummy_img_path}.")
