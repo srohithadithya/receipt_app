@@ -42,8 +42,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     lines = text.split('\n')
     lower_text = text.lower()
 
-    # --- 1. Extract Amount and Currency ---
-    # More robust patterns for total/amount, trying common keywords and positioning
     amount_patterns = [
         # Strong indicators for total amounts, allowing for variations in spacing/symbols
         r"(?:total|amount due|grand total|net amount|balance due|total paid|total bill|due amount)\s*[:=]?\s*([$€£₹]\s*[\d,]+\.?\d{0,2})",
@@ -54,7 +52,7 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     ]
 
     amount = None
-    currency = "USD" # Default currency
+    currency = "INR" # Default currency
 
     for pattern in amount_patterns:
         match = re.search(pattern, lower_text, re.IGNORECASE)
@@ -74,7 +72,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
             clean_value_str = re.sub(r'[^\d.]', '', value_str) # Keep only digits and dot
             try:
                 amount = float(clean_value_str)
-                # Simple sanity check for amounts (e.g., not extremely small or huge by accident)
                 if amount > 0.01 and amount < 1_000_000:
                     break # Found a plausible amount, stop searching
                 else:
@@ -89,8 +86,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     else:
         logger.warning("Could not reliably extract amount.")
 
-    # --- 2. Extract Date ---
-    # More date formats and robust extraction, trying multiple lines
     date_patterns = [
         r'\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}',            # DD-MM-YY, DD/MM/YYYY etc.
         r'\d{4}[-/.]\d{1,2}[-/.]\d{1,2}',            # YYYY-MM-DD etc.
@@ -139,8 +134,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     else:
         logger.warning("Could not reliably extract transaction date.")
 
-
-     # --- 3. Extract Vendor / Biller ---
     vendor_patterns = [
         r'invoice from[:\s]*(.+)',
         r'bill from[:\s]*(.+)',
@@ -163,8 +156,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
                 vendor_name = potential_vendor
                 break
     
-    # Fallback: Heuristics for common top-of-document placements
-    # Scan the first few non-empty lines for prominent text
     if not vendor_name:
         # Consider the first 5-7 non-empty lines
         top_lines_to_scan = [line.strip() for line in lines if line.strip()][:7] 
@@ -210,7 +201,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
     else:
         logger.warning("Could not reliably extract vendor name.")
         
-    # --- 4. Extract Category (Optional) ---
     category_map = {
         'grocer': 'Groceries', 'supermart': 'Groceries', 'hypermarket': 'Groceries', 'foodmart': 'Groceries', 'bakery': 'Groceries', 'market': 'Groceries',
         'electricity': 'Utilities', 'power bill': 'Utilities', 'light bill': 'Utilities',
@@ -231,8 +221,6 @@ def _extract_from_text(text: str, file_type: str = 'text') -> Dict[str, Any]:
             logger.debug(f"Category found: {category}")
             break
 
-
-    # --- 5. Extract Billing Period ---
     billing_period_patterns = [
         r"(?:billing|service|period)\s*[:=]?\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\s*(?:to|-)\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})",
         r"for the period\s*from\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\s*to\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
@@ -326,17 +314,10 @@ def parse_document(file_path: Path, original_filename: str) -> Optional[ParsedRe
                 logger.info(f"Extracted text directly from PDF {original_filename}.")
             else:
                 logger.info(f"PDF {original_filename} contains no selectable text, or text extraction failed. Skipping OCR for PDF.")
-                # We are explicitly NOT falling back to OCR for PDFs here
-                # because `ocr_utils.extract_text_from_image` expects image bytes,
-                # not raw PDF bytes, and we are not introducing a PDF rendering library.
-                # If a PDF contains no selectable text (i.e., it's a scanned image-based PDF),
-                # it cannot be OCR'd with the current `ocr_utils` setup.
-                # User should be informed to convert such PDFs to images first.
-
+            
         except Exception as e:
             logger.warning(f"Error extracting text directly from PDF {original_filename}: {e}. Treating as unreadable PDF for text extraction.", exc_info=True)
-            # This means the PDF could not be processed for text directly, and we don't have a way to OCR it.
-
+           
     elif file_type == 'image':
         try:
             detected_lang = detect_language(raw_content_bytes)
@@ -353,23 +334,18 @@ def parse_document(file_path: Path, original_filename: str) -> Optional[ParsedRe
 
     if not extracted_text or not extracted_text.strip():
         logger.warning(f"Final extracted text from {original_filename} is empty or only whitespace.")
-        # Specific error message for PDFs that are not text-searchable
         if file_type == 'pdf':
             raise ParsingError(f"PDF {original_filename} has no selectable text. Please ensure it's a text-searchable PDF or convert it to an image (.png/.jpg) for OCR processing.")
         else:
             raise ParsingError(f"No meaningful text extracted from {original_filename}.")
 
-
-    # Perform rule-based extraction
     extracted_fields = _extract_from_text(extracted_text, file_type)
     extracted_fields['parsed_raw_text'] = extracted_text # Store raw text in the final model
 
-    # Validate with Pydantic model
     try:
         validated_data = ParsedReceiptData(**extracted_fields)
         logger.info(f"Successfully parsed and validated data for {original_filename}.")
         return validated_data
     except Exception as e:
         logger.error(f"Validation failed for {original_filename} with extracted fields: {extracted_fields}. Error: {e}", exc_info=True)
-        # Re-raise as ParsingError to be caught by the uploader
         raise ParsingError(f"Data validation failed after extraction: {e}")
