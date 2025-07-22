@@ -101,8 +101,6 @@ def show_records_page():
     st.subheader(f"Total Filtered Records: {len(df)}")
     display_records_table(df, key="records_display_table")
 
-    st.markdown("---")
-
     # --- Manual Correction & Deletion ---
     st.header("Manual Correction & Actions")
     st.info("Select a record's ID below to update its fields or delete it.")
@@ -206,9 +204,6 @@ def show_records_page():
 
     else:
         st.info("Select a record ID above to enable manual correction or deletion.")
-
-
-    st.markdown("---")
 
     # --- Export Data ---
     st.header("Export Your Data")
