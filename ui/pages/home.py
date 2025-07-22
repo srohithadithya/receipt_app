@@ -59,7 +59,7 @@ def show_home_page():
             <li><b>Multi-Currency & Language (Bonus!)</b>: Detects different currencies and can even process receipts in multiple languages, making it truly global.</li>
         </ul>
         """, unsafe_allow_html=True)
-        st.image("assets/images/ai_chart_summary.png", use_column_width=True)
+        st.image("assets/images/ai_chart_summary.png", use_container_width=True)
 
     with col_feature2:
         st.subheader("Deep Dive into Your Spending Habits")
@@ -71,7 +71,7 @@ def show_home_page():
             <li><b>Secure & Private</b>: Your financial data is stored securely in a lightweight, ACID-compliant database, accessible only to you through a protected login system.</li>
         </ul>
         """, unsafe_allow_html=True)
-        st.image("assets/images/ai_finance_bg.png", use_column_width=True)
+        st.image("assets/images/ai_finance_bg.png", use_container_width=True)
 
 
     st.subheader("Ready to Take Control of Your Finances?")
