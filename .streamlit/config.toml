@@ -1,5 +1,4 @@
 # This file is for Streamlit configuration settings.
-# It should be placed in the .streamlit/ directory in your project root.
 
 [server]
 # The port where the Streamlit app will run.
