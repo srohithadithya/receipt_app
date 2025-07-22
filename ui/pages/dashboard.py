@@ -31,7 +31,6 @@ def show_dashboard_page():
 
     if not receipts_db_objects:
         st.info("No receipts uploaded yet. Please upload some to see insights!")
-        st.markdown("---")
         st.subheader("How to get started?")
         st.markdown("Navigate to the **'Upload Receipt'** page from the sidebar and start digitizing your expenses!")
         return
@@ -106,7 +105,6 @@ def show_dashboard_page():
     else:
         st.info("No monthly trend data to display.")
 
-    st.markdown("---")
     st.header("Raw Data View")
     st.markdown("<p style='font-family: \"Roboto\", sans-serif;'>For a detailed look at your transactions, navigate to the 'View Records' page.</p>", unsafe_allow_html=True)
     if st.button("Go to View Records"):
