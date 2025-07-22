@@ -7,10 +7,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Define paths relative to the project root
-# It's assumed this code runs from the project root or imports are handled correctly.
 # For Streamlit, st.file_uploader provides BytesIO object, not a direct file path.
-# We'll save the BytesIO content to a temporary file first.
 BASE_DATA_DIR = Path("data")
 RAW_RECEIPTS_DIR = BASE_DATA_DIR / "raw_receipts"
 
