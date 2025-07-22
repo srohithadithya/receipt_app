@@ -68,9 +68,6 @@ def show_dashboard_page():
     with col4:
         display_info_card("Most Common Spend", f"{mode_spend[0]:.2f} {df['currency'].iloc[0] if mode_spend else ''}" if mode_spend else "N/A", "🎯")
 
-
-    st.markdown("---")
-
     # --- Visualizations ---
     st.header("Detailed Spending Visualizations")
 
@@ -93,7 +90,6 @@ def show_dashboard_page():
         st.plotly_chart(fig_category, use_container_width=True)
     else:
         st.info("No category data to display.")
-
 
     # Monthly Spend Trend with Rolling Average
     st.subheader("Monthly Spending Trend")
