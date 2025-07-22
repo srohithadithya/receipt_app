@@ -92,11 +92,11 @@ def detect_currency(text: str) -> str:
     Prioritizes explicit ISO codes if present.
 
     :param text: The text content (e.g., raw text from a receipt).
-    :return: The detected currency code (e.g., 'USD', 'EUR'), defaults to 'USD'.
+    :return: The detected currency code (e.g., 'USD', 'EUR'), defaults to 'INR'.
     """
     if not isinstance(text, str):
         logger.warning(f"Non-string input for currency detection: {type(text)}")
-        return 'USD'
+        return 'INR'
 
     text_lower = text.lower()
 
@@ -120,8 +120,8 @@ def detect_currency(text: str) -> str:
                 logger.debug(f"Detected currency: {code} from pattern '{pattern}'.")
                 return code
 
-    logger.info("No specific currency detected, defaulting to USD.")
-    return 'USD'
+    logger.info("No specific currency detected, defaulting to INR.")
+    return 'INR'
 
 def is_valid_email(email: str) -> bool:
     """
