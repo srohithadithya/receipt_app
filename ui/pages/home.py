@@ -5,22 +5,6 @@ import os # Import os module
 def show_home_page():
     # --- Logo and Title Side-by-Side ---
     # Using markdown with custom CSS class for horizontal alignment and styling
-    
-    logo_path = "assets/images/logo.png"
-    
-    # --- TEMPORARY DEBUGGING CODE ---
-    if not os.path.exists(logo_path):
-        st.error(f"DEBUG: Logo file NOT FOUND at path: {logo_path}. Current working directory: {os.getcwd()}")
-    else:
-        st.success(f"DEBUG: Logo file FOUND at path: {logo_path}.")
-        try:
-            # Attempt to open and display the image
-            st.image(logo_path, width=150)
-            st.success("DEBUG: Logo loaded successfully.")
-        except Exception as e:
-            st.error(f"DEBUG: Error loading image at {logo_path}: {e}. Is it a valid PNG?")
-    # --- END TEMPORARY DEBUGGING CODE ---
-
 
     st.markdown("""
     <div class="welcome-header">
