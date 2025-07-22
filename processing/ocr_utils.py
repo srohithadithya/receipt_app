@@ -9,7 +9,6 @@ from typing import Optional, Tuple
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Set the path to the tesseract executable if it's not in your PATH
 # For Windows: pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 # For macOS/Linux, usually not needed if installed via package manager.
 # Ensure Tesseract is installed on your system as a prerequisite.
@@ -33,16 +32,9 @@ def preprocess_image_for_ocr(image_bytes: bytes) -> Optional[np.ndarray]:
         # --- Basic Preprocessing ---
         gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
 
-        # Apply adaptive thresholding (good for varying lighting)
-        # Using ADAPTIVE_THRESH_GAUSSIAN_C can be more robust than MEAN_C
         thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 11, 2) # Block size 11, C value 2
 
-        # --- Optional: Noise Reduction (Median Blur) ---
-        # Useful if image has salt-and-pepper noise
-        # thresh = cv2.medianBlur(thresh, 3) # Apply a median blur with a 3x3 kernel
-
-        # --- Optional: Deskewing (straighten slanted text) ---
         # Only attempt if the image is large enough
         if thresh.shape[0] > 10 and thresh.shape[1] > 10:
             coords = np.column_stack(np.where(thresh > 0))
@@ -63,13 +55,7 @@ def preprocess_image_for_ocr(image_bytes: bytes) -> Optional[np.ndarray]:
             logger.debug("Image too small for deskewing attempt.")
 
 
-        # --- Ensure image is 300 DPI for Tesseract (if original resolution is too low) ---
-        # This is more conceptual for CV2 processing; actual DPI depends on initial image source
-        # For actual DPI control, you might need to resize the image explicitly.
-        # Example: if you know you want 300 DPI and current is 72, scale factor = 300/72
-        # scaled_thresh = cv2.resize(thresh, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
-        # For this standard setup, we rely on the internal scaling of tesseract, or good input.
-
+        # --- Ensure image is 300 DPI for Tesseract (if original resolution is too low) 
         logger.info("Image preprocessed (grayscale, adaptive thresholded, deskewed attempted).")
         return thresh # Return the processed NumPy array
 
@@ -112,8 +98,6 @@ def detect_language(image_bytes: bytes) -> Optional[str]:
     :param image_bytes: Raw image content as bytes.
     :return: Detected language code (e.g., 'eng', 'hin') or None.
     """
-    # For language detection, sometimes raw image works better or a different preprocessing
-    # For now, reuse the same preprocessing
     processed_img_np = preprocess_image_for_ocr(image_bytes)
     if processed_img_np is None:
         return None
@@ -121,15 +105,6 @@ def detect_language(image_bytes: bytes) -> Optional[str]:
     try:
         pil_img = Image.fromarray(processed_img_np)
         osd_output = pytesseract.image_to_osd(pil_img)
-        # Parse the OSd output to find language. This is a simple regex.
-        # Example OSD output:
-        # Page number: 0
-        # Orientation in degrees: 0
-        # Rotate: 0
-        # Orientation confidence: 26.21
-        # Script: Latin
-        # Script confidence: 4.67
-        # Language: eng
         
         # Regex to capture the language code
         match = re.search(r"Language:\s*(\w+)", osd_output, re.IGNORECASE)
