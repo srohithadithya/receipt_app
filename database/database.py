@@ -11,18 +11,12 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO) # Or INFO for less
 DATABASE_URL = "sqlite:///./receipt_app.db"
 
 # Create a SQLAlchemy engine.
-# connect_args={"check_same_thread": False} is required for SQLite with FastAPI/Streamlit
-# because SQLite doesn't allow multiple threads to access the same connection by default.
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 # Create a session local class.
-# This instance of SessionLocal will be the actual database session.
-# autocommit=False means transactions are not committed automatically.
-# autoflush=False means objects are not flushed to the database until commit.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Base class for declarative models.
-# All SQLAlchemy models will inherit from this Base.
 Base = declarative_base()
 
 def get_db():
@@ -52,8 +46,3 @@ def create_db_tables():
     except SQLAlchemyError as e:
         logging.error(f"Error creating database tables: {e}")
         raise # Re-raise the exception if table creation fails
-
-# It's good practice to call create_db_tables at the application's entry point (e.g., app.py)
-# rather than directly here to ensure the engine is fully set up and avoid circular imports.
-# However, for a complete standalone file, uncommenting this will create tables upon import.
-# create_db_tables()
