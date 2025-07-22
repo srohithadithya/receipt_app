@@ -5,8 +5,12 @@ from database.crud import get_receipts_by_user, get_all_vendors, get_all_categor
 from database.database import get_db
 from processing.aggregation import calculate_expenditure_summary, get_vendor_frequency, get_monthly_spend_trend
 from ui.plots import plot_pie_chart, plot_bar_chart, plot_line_chart
-from ui.components import display_info_card # Import new component
+from ui.components import display_info_card
 from datetime import date
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def show_dashboard_page():
     auth_manager = AuthManager()
@@ -62,7 +66,7 @@ def show_dashboard_page():
     with col3:
         display_info_card("Median Spend", f"{median_spend:.2f} {df['currency'].iloc[0] if not df.empty else ''}", "📊")
     with col4:
-        display_info_card("Most Common Spend", f"{mode_spend[0]:.2f} {df['currency'].iloc[0] if not df.empty else ''}" if mode_spend else "N/A", "🎯")
+        display_info_card("Most Common Spend", f"{mode_spend[0]:.2f} {df['currency'].iloc[0] if mode_spend else ''}" if mode_spend else "N/A", "🎯")
 
 
     st.markdown("---")
@@ -101,7 +105,16 @@ def show_dashboard_page():
     if not monthly_trend_df.empty:
         fig_monthly_trend = plot_line_chart(monthly_trend_df, 'month', 'total_amount', 'Monthly Expenditure Trend',
                                             y_secondary_col='rolling_avg' if 'rolling_avg' in monthly_trend_df.columns else None,
-                                            hover_data=['total_amount', 'rolling_avg'])
+                                            hover_data={'total_amount': ':.2f', 'rolling_avg': ':.2f'}) # Format hover
         st.plotly_chart(fig_monthly_trend, use_container_width=True)
     else:
         st.info("No monthly trend data to display.")
+
+    st.markdown("---")
+    st.header("Raw Data View")
+    st.markdown("<p style='font-family: \"Roboto\", sans-serif;'>For a detailed look at your transactions, navigate to the 'View Records' page.</p>", unsafe_allow_html=True)
+    if st.button("Go to View Records"):
+        # Corrected: Set the session state variable that controls the radio button's *initial value*
+        # in the *next* rerun, then force a rerun.
+        st.session_state["current_main_page"] = "View Records" # This is the variable app.py uses
+        st.rerun()
