@@ -85,54 +85,69 @@
 **This design ensures clear separation of concerns, high maintainability, and extensibility**.
 
 receipt_app/
-├── .streamlit/ # Streamlit configuration
+├── .streamlit/             # Streamlit configuration
 │   └── config.toml
-├── data/ # Storage for uploaded files
-│   └── raw_receipts/           # Original uploaded files
-│   └── processed_data/         # Interim processed data if needed
-├── database/ # SQLAlchemy models and CRUD operations
-│   ├── init.py
-│   ├── database.py # DB connection setup
-│   ├── models.py # DB schema (User, Receipt, Vendor, Category)
-│   └── crud.py # DB interactions
-├── processing/ # Core data handling logic
-│   ├── init.py
-│   ├── validation.py # Pydantic models & file validation
-│   ├── ingestion.py # File I/O
-│   ├── parsing.py # Data extraction (OCR, rules)
-│   ├── ocr_utils.py # OCR specific helpers
-│   ├── algorithms/
-│   │   ├── init.py
-│   │   ├── search.py # Search algorithms
-│   │   └── sort.py # Sorting algorithms
-│   └── aggregation.py # Statistical computations
-├── ui/ # Streamlit UI components
-│   ├── init.py
-│   ├── components.py # Reusable UI widgets
-│   ├── plots.py # Visualization functions
-│   ├── pages/ # Multi-page application structure
-│   │   ├── auth/ # Login and Signup pages
-│   │   │   ├── init.py
-│   │   │   ├── login.py # Login page UI and logic
-│   │   │   └── signup.py # Signup page UI and logic
-│   │   ├── dashboard.py # Main insights view
-│   │   ├── upload.py # Receipt upload page
-│   │   └── records.py # Individual record view & manual correction
-│   └── auth_manager.py # Streamlit session state for auth
-├── utils/ # General utilities and security
-│   ├── init.py
-│   ├── helpers.py # Date, currency, export utilities
-│   ├── security.py # Password hashing & verification
-│   └── errors.py # Custom exceptions
-├── tests/ # Unit and integration tests
+├── assets/                 # Static assets like images (logo, AI pics)
+│   ├── images/
+│   │   ├── logo.png
+│   │   ├── ai_finance_bg.png
+│   │   └── ai_chart_summary.png
+├── data/                   
+│   ├── raw_receipts/       # Original uploaded files
+│   │   └── .gitkeep
+│   └── processed_data/     # Interim processed data if needed
+│       └── .gitkeep
+├── database/
+│   ├── __init__.py         # Makes 'database' a Python package
+│   ├── database.py        
+│   ├── models.py          
+│   └── crud.py            
+├── processing/
+│   ├── __init__.py         # Makes 'processing' a Python package
+│   ├── validation.py
+│   ├── ingestion.py        
+│   ├── parsing.py          
+│   ├── ocr_utils.py        
+│   ├── algorithms/         
+│   │   ├── __init__.py
+│   │   ├── search.py       
+│   │   └── sort.py         
+│   └── aggregation.py      
+├── ui/                     # User Interface components (Streamlit specific)
+│   ├── __init__.py         # Makes 'ui' a Python package
+│   ├── auth_manager.py     
+│   ├── components.py       
+│   ├── plots.py            
+│   ├── pages/              
+│   │   ├── __init__.py
+│   │   ├── home.py        
+│   │   ├── auth/           # Authentication pages
+│   │   │   ├── __init__.py
+│   │   │   ├── login.py    
+│   │   │   └── signup.py   
+│   │   ├── dashboard.py    
+│   │   ├── upload.py       
+│   │   └── records.py      
+├── utils/                  # General utility functions and error handling
+│   ├── __init__.py         # Makes 'utils' a Python package
+│   ├── helpers.py         
+│   ├── security.py        
+│   └── errors.py          
+├── tests/                  # Unit and integration tests (for development/CI)
+│   ├── __init__.py
+│   ├── conftest.py         # Pytest fixtures for shared test setup (e.g., DB session, mocks)
 │   ├── test_database.py
-│   ├── test_processing.py
-│   ├── test_ui.py
-│   └── test_auth.py # Tests for authentication logic
-├── .gitignore # Git ignore file
-├── app.py # Main Streamlit application entry point
-├── requirements.txt # Python dependency list
-└── README.md # Project documentation
+│   ├── test_security.py
+│   ├── test_processing_validation_ingestion.py
+│   ├── test_processing_ocr_parsing.py
+│   ├── test_processing_algorithms.py
+│   ├── test_processing_aggregation.py
+│   ├── test_ui_auth.py
+│   └── test_ui_pages_logic.py
+├── .gitignore              
+├── app.py                  
+├── requirements.txt        # List of all Python dependencies (for pip)
+└── packages.txt     
 
 ## **4. Setup & Installation**
 
