@@ -17,9 +17,6 @@ logger = logging.getLogger(__name__)
 # Initialize AuthManager instance
 auth_manager = AuthManager()
 
-# Create database tables if they don't exist.
-# This ensures the database schema is ready when the application starts.
-# It's called once when the script is loaded by Streamlit.
 try:
     create_db_tables()
     logger.info("Database tables initialized successfully or already exist.")
@@ -194,9 +191,6 @@ def main():
 
 # --- Entry Point ---
 if __name__ == "__main__":
-    # Ensure all necessary modules are imported for the application to run
-    # This might implicitly trigger some module-level code (like DB table creation)
-    # The order of imports matters if modules have side effects or dependencies on each other's initialization.
     import database.database # Ensures database.py is loaded and tables potentially created
     import database.crud    # Ensures CRUD functions are available
     import utils.security
