@@ -54,7 +54,7 @@ class ParsedReceiptData(BaseModel):
             # Basic validation for common currencies. Could be expanded with a lookup table.
             if len(upper_v) <= 5 and upper_v.isalpha():
                 return upper_v
-        return "USD" # Default to USD if invalid or cannot determine
+        return "INR" # Default to INR if invalid or cannot determine
 
 def validate_file_type(file_name: str) -> Optional[str]:
     """
