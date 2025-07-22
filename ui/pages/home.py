@@ -48,7 +48,6 @@ def show_home_page():
         """, unsafe_allow_html=True)
         st.image("assets/images/ai_finance_bg.png", use_column_width=True, caption="Intelligent financial management")
 
-    st.markdown("---")
 
     st.subheader("Ready to Take Control of Your Finances?")
     st.markdown("<p style='font-family: \"Roboto\", sans-serif; font-size: 1.1em;'>Join us today and transform your financial management!</p>", unsafe_allow_html=True)
