@@ -3,16 +3,13 @@ import time
 import os # Import os module
 
 def show_home_page():
-    # --- Logo and Title Side-by-Side ---
-    # Using markdown with custom CSS class for horizontal alignment and styling
+   col1, col2 = st.columns([1, 4])
 
-    st.markdown("""
-    <div class="welcome-header">
-        <img src="assets/images/logo.png" alt="Receipt Tracker Logo", width = 150>
-        <h1>Welcome to Receipt & Bill Tracker!</h1>
-    </div>
-    """, unsafe_allow_html=True)
+with col1:
+    st.image("assets/images/logo.png", width=100)  # Adjust width as needed
 
+with col2:
+    st.markdown("## Welcome to Receipt & Bill Tracker!")
 
     st.markdown("""
     <div style="background-color: #e8f5e9; padding: 25px; border-radius: 10px; margin-bottom: 30px; border-left: 5px solid #4CAF50;">
